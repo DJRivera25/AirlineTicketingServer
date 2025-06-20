@@ -72,52 +72,61 @@ module.exports.searchFlights = async (req, res) => {
   try {
     const { from, to, departure, return: returnDate, passengers = 1 } = req.body;
 
-    // Validate required fields
     if (!from || !to || !departure) {
       return res.status(400).json({
         message: "From, to, and departure date are required.",
       });
     }
 
-    // Convert inputs
     const normalizedFrom = from.toUpperCase();
     const normalizedTo = to.toUpperCase();
     const depStart = new Date(departure);
     const depEnd = new Date(depStart);
     depEnd.setDate(depEnd.getDate() + 1);
 
-    console.log("Searching outbound flights...");
-    console.log({ normalizedFrom, normalizedTo, depStart, depEnd });
-
-    const outboundFlights = await Flight.find({
+    // Step 1: Get outbound flights within time range
+    let outboundFlights = await Flight.find({
       from: normalizedFrom,
       to: normalizedTo,
-      departureTime: {
-        $gte: depStart,
-        $lt: depEnd,
-      },
-      availableSeats: { $gte: passengers },
+      departureTime: { $gte: depStart, $lt: depEnd },
     }).sort({ departureTime: 1 });
 
-    let returnFlights = [];
+    // Step 2: Filter by available seats for outbound
+    outboundFlights = await Promise.all(
+      outboundFlights.map(async (flight) => {
+        const availableSeats = await Seat.countDocuments({
+          flight: flight._id,
+          isAvailable: true,
+        });
 
+        return availableSeats >= passengers ? { ...flight.toObject(), availableSeats } : null;
+      })
+    );
+    outboundFlights = outboundFlights.filter(Boolean); // Remove nulls
+
+    let returnFlights = [];
     if (returnDate) {
       const retStart = new Date(returnDate);
       const retEnd = new Date(retStart);
       retEnd.setDate(retEnd.getDate() + 1);
 
-      console.log("Searching return flights...");
-      console.log({ from: normalizedTo, to: normalizedFrom, retStart, retEnd });
-
-      returnFlights = await Flight.find({
+      let returns = await Flight.find({
         from: normalizedTo,
         to: normalizedFrom,
-        departureTime: {
-          $gte: retStart,
-          $lt: retEnd,
-        },
-        availableSeats: { $gte: passengers },
+        departureTime: { $gte: retStart, $lt: retEnd },
       }).sort({ departureTime: 1 });
+
+      returnFlights = await Promise.all(
+        returns.map(async (flight) => {
+          const availableSeats = await Seat.countDocuments({
+            flight: flight._id,
+            isAvailable: true,
+          });
+
+          return availableSeats >= passengers ? { ...flight.toObject(), availableSeats } : null;
+        })
+      );
+      returnFlights = returnFlights.filter(Boolean);
     }
 
     const noOutbound = outboundFlights.length === 0;
