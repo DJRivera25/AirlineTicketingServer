@@ -39,7 +39,7 @@ router.get(
     const token = auth.createAccessToken(user);
 
     // Optional: Also send name/picture to frontend
-    const redirectUrl = new URL("http://localhost:3000/google-login");
+    const redirectUrl = new URL(`${process.env.CLIENT_URL}/google-login`);
     redirectUrl.searchParams.append("token", token);
     res.redirect(redirectUrl.toString());
   }

@@ -5,7 +5,7 @@ const auth = require("./auth.js"); // Authentication utilities (e.g., JWT handli
 require("dotenv").config();
 
 const PORT = process.env.PORT;
-const URL = process.env.CLIENT_API;
+const URL = process.env.SERVER_URL;
 // Import Passport for authentication
 const passport = require("passport");
 
