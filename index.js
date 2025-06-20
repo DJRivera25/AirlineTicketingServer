@@ -14,13 +14,15 @@ const app = express();
 app.use(express.json());
 
 // ===== CORS SETUP (for dev + production) ===== //
-const allowedOrigins = ["http://localhost:3000", `${process.env.CLIENT_URL}`];
+const rawOrigins = process.env.CLIENT_URLS || "";
+const allowedOrigins = rawOrigins.split(",").map((url) => url.trim().replace(/\/$/, ""));
 
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
       callback(null, true);
     } else {
+      console.error("❌ CORS Blocked Origin:", origin);
       callback(new Error("Not allowed by CORS"));
     }
   },
