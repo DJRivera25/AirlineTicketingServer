@@ -5,6 +5,7 @@ const auth = require("./auth.js"); // Authentication utilities (e.g., JWT handli
 require("dotenv").config();
 
 const PORT = process.env.PORT;
+const URL = process.env.CLIENT_API;
 // Import Passport for authentication
 const passport = require("passport");
 
@@ -22,7 +23,7 @@ passport.use(
       clientSecret: process.env.CLIENT_SECRET,
 
       // The URL Google will redirect to after user grants permission
-      callbackURL: `http://localhost:${PORT}/users/google/callback`,
+      callbackURL: `${URL}/users/google/callback`,
 
       // Allows us to pass the original request to the callback (optional)
       passReqToCallback: true,
