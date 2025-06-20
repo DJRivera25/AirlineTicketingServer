@@ -6,7 +6,7 @@ module.exports.getAllFlights = async (req, res) => {
   try {
     const { page = 1, limit = 5, search = "" } = req.query;
 
-    // Build search query
+    // Search query
     const searchQuery = {
       $or: [
         { airline: { $regex: search, $options: "i" } },
@@ -16,17 +16,32 @@ module.exports.getAllFlights = async (req, res) => {
       ],
     };
 
-    // Count total matching documents
-    const total = await Flight.countDocuments(search ? searchQuery : {});
+    const filter = search ? searchQuery : {};
 
-    // Find flights with pagination
-    const flights = await Flight.find(search ? searchQuery : {})
+    const total = await Flight.countDocuments(filter);
+
+    const flights = await Flight.find(filter)
       .skip((page - 1) * limit)
       .limit(Number(limit))
       .sort({ createdAt: -1 });
 
+    // Dynamically inject availableSeats
+    const flightsWithAvailableSeats = await Promise.all(
+      flights.map(async (flight) => {
+        const availableSeats = await Seat.countDocuments({
+          flight: flight._id,
+          isAvailable: true,
+        });
+
+        return {
+          ...flight.toObject(),
+          availableSeats,
+        };
+      })
+    );
+
     res.status(200).json({
-      flights,
+      flights: flightsWithAvailableSeats,
       totalPages: Math.ceil(total / limit),
       currentPage: Number(page),
       totalItems: total,
@@ -41,7 +56,13 @@ module.exports.getSingleFlight = async (req, res) => {
   try {
     const flight = await Flight.findById(req.params.id);
     if (!flight) return res.status(404).json({ message: "Flight not found" });
-    res.status(200).json(flight);
+
+    const availableSeats = await Seat.countDocuments({
+      flight: flight._id,
+      isAvailable: true,
+    });
+
+    res.status(200).json({ ...flight.toObject(), availableSeats });
   } catch (error) {
     res.status(500).json({ message: "Error fetching flight", error });
   }

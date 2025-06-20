@@ -14,7 +14,7 @@ const app = express();
 app.use(express.json());
 
 // ===== CORS SETUP (for dev + production) ===== //
-const allowedOrigins = ["http://localhost:3000", "https://airline-ticketing-client.vercel.app"];
+const allowedOrigins = ["http://localhost:3000", `${process.env.CLIENT_URL}`];
 
 const corsOptions = {
   origin: function (origin, callback) {
