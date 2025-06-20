@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const passport = require("passport");
 const autoFailBookings = require("./jobs/autoFailBookings");
 const session = require("express-session");
+const MongoStore = require("connect-mongo");
 const cors = require("cors");
 require("dotenv").config();
 
@@ -12,21 +13,32 @@ const app = express();
 // ===== MIDDLEWARES ===== //
 app.use(express.json());
 
+// CORS: Allow local or Render frontend
 const corsOptions = {
-  origin: ["http://localhost:3000"],
+  origin: process.env.CLIENT_ORIGIN || "http://localhost:3000",
   credentials: true,
-  optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
 
-// ===== GOOGLE OAUTH ===== //
+// ===== SESSIONS ===== //
 app.use(
   session({
-    secret: process.env.CLIENT_SECRET,
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    store: MongoStore.create({
+      mongoUrl: process.env.MONGODB_STRING,
+      collectionName: "sessions",
+    }),
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+    },
   })
 );
+
+// ===== GOOGLE OAUTH ===== //
 require("./passport.js");
 app.use(passport.initialize());
 app.use(passport.session());
@@ -47,26 +59,33 @@ app.use("/passengers", passengerRoute);
 app.use("/seats", seatRoute);
 app.use("/payments", paymentRoute);
 
+// ===== START SERVER ===== //
 async function startServer() {
   try {
     await mongoose.connect(process.env.MONGODB_STRING);
-
     console.log("Connected to MongoDB Atlas successfully!");
+
     autoFailBookings();
+
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
     });
   } catch (error) {
     console.error("Failed to connect to MongoDB", error);
-    process.exit(1); // Exit the process if DB connection fails
+    process.exit(1);
   }
 }
 
-// Only start server if this file is run directly (not imported)
+// ===== HANDLE ERRORS GLOBALLY ===== //
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled Rejection:", err);
+  process.exit(1);
+});
+
+// ===== LAUNCH ===== //
 if (require.main === module) {
   startServer();
 }
 
-// ===== EXPORTS ===== //
 module.exports = { app, mongoose };
