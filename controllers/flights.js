@@ -1,12 +1,13 @@
 const Flight = require("../models/Flight");
 const Seat = require("../models/Seat");
 
-/* ===============PUBLIC================== */
+/* =============== PUBLIC CONTROLLERS =============== */
+
+// GET all flights with pagination + search
 module.exports.getAllFlights = async (req, res) => {
   try {
     const { page = 1, limit = 5, search = "" } = req.query;
 
-    // Search query
     const searchQuery = {
       $or: [
         { airline: { $regex: search, $options: "i" } },
@@ -17,7 +18,6 @@ module.exports.getAllFlights = async (req, res) => {
     };
 
     const filter = search ? searchQuery : {};
-
     const total = await Flight.countDocuments(filter);
 
     const flights = await Flight.find(filter)
@@ -25,23 +25,18 @@ module.exports.getAllFlights = async (req, res) => {
       .limit(Number(limit))
       .sort({ createdAt: -1 });
 
-    // Dynamically inject availableSeats
-    const flightsWithAvailableSeats = await Promise.all(
+    const flightsWithSeats = await Promise.all(
       flights.map(async (flight) => {
         const availableSeats = await Seat.countDocuments({
           flight: flight._id,
-          isAvailable: true,
+          isBooked: false,
         });
-
-        return {
-          ...flight.toObject(),
-          availableSeats,
-        };
+        return { ...flight.toObject(), availableSeats };
       })
     );
 
     res.status(200).json({
-      flights: flightsWithAvailableSeats,
+      flights: flightsWithSeats,
       totalPages: Math.ceil(total / limit),
       currentPage: Number(page),
       totalItems: total,
@@ -52,6 +47,7 @@ module.exports.getAllFlights = async (req, res) => {
   }
 };
 
+// GET single flight + dynamic seat count
 module.exports.getSingleFlight = async (req, res) => {
   try {
     const flight = await Flight.findById(req.params.id);
@@ -59,7 +55,7 @@ module.exports.getSingleFlight = async (req, res) => {
 
     const availableSeats = await Seat.countDocuments({
       flight: flight._id,
-      isAvailable: true,
+      isBooked: false,
     });
 
     res.status(200).json({ ...flight.toObject(), availableSeats });
@@ -68,14 +64,13 @@ module.exports.getSingleFlight = async (req, res) => {
   }
 };
 
+// SEARCH flights with outbound and return logic
 module.exports.searchFlights = async (req, res) => {
   try {
     const { from, to, departure, return: returnDate, passengers = 1 } = req.body;
 
     if (!from || !to || !departure) {
-      return res.status(400).json({
-        message: "From, to, and departure date are required.",
-      });
+      return res.status(400).json({ message: "From, to, and departure date are required." });
     }
 
     const normalizedFrom = from.toUpperCase();
@@ -84,25 +79,19 @@ module.exports.searchFlights = async (req, res) => {
     const depEnd = new Date(depStart);
     depEnd.setDate(depEnd.getDate() + 1);
 
-    // Step 1: Get outbound flights within time range
     let outboundFlights = await Flight.find({
       from: normalizedFrom,
       to: normalizedTo,
       departureTime: { $gte: depStart, $lt: depEnd },
     }).sort({ departureTime: 1 });
 
-    // Step 2: Filter by available seats for outbound
     outboundFlights = await Promise.all(
       outboundFlights.map(async (flight) => {
-        const availableSeats = await Seat.countDocuments({
-          flight: flight._id,
-          isAvailable: true,
-        });
-
-        return availableSeats >= passengers ? { ...flight.toObject(), availableSeats } : null;
+        const count = await Seat.countDocuments({ flight: flight._id, isBooked: false });
+        return count >= passengers ? { ...flight.toObject(), availableSeats: count } : null;
       })
     );
-    outboundFlights = outboundFlights.filter(Boolean); // Remove nulls
+    outboundFlights = outboundFlights.filter(Boolean);
 
     let returnFlights = [];
     if (returnDate) {
@@ -110,20 +99,16 @@ module.exports.searchFlights = async (req, res) => {
       const retEnd = new Date(retStart);
       retEnd.setDate(retEnd.getDate() + 1);
 
-      let returns = await Flight.find({
+      let returnCandidates = await Flight.find({
         from: normalizedTo,
         to: normalizedFrom,
         departureTime: { $gte: retStart, $lt: retEnd },
       }).sort({ departureTime: 1 });
 
       returnFlights = await Promise.all(
-        returns.map(async (flight) => {
-          const availableSeats = await Seat.countDocuments({
-            flight: flight._id,
-            isAvailable: true,
-          });
-
-          return availableSeats >= passengers ? { ...flight.toObject(), availableSeats } : null;
+        returnCandidates.map(async (flight) => {
+          const count = await Seat.countDocuments({ flight: flight._id, isBooked: false });
+          return count >= passengers ? { ...flight.toObject(), availableSeats: count } : null;
         })
       );
       returnFlights = returnFlights.filter(Boolean);
@@ -132,7 +117,7 @@ module.exports.searchFlights = async (req, res) => {
     const noOutbound = outboundFlights.length === 0;
     const noReturn = returnDate && returnFlights.length === 0;
 
-    return res.status(200).json({
+    res.status(200).json({
       roundTrip: !!returnDate,
       outbound: outboundFlights,
       return: returnFlights,
@@ -147,87 +132,70 @@ module.exports.searchFlights = async (req, res) => {
     });
   } catch (error) {
     console.error("Flight search failed:", error);
-    return res.status(500).json({
-      message: "Flight search failed.",
-      error: error.message,
-    });
+    res.status(500).json({ message: "Flight search failed", error: error.message });
   }
 };
 
+// GET upcoming flights
 exports.getUpcomingFlights = async (req, res) => {
   try {
     const today = new Date();
-    const flights = await Flight.find({ date: { $gte: today } });
+    const flights = await Flight.find({ departureTime: { $gte: today } }).sort({ departureTime: 1 });
     res.status(200).json(flights);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch upcoming flights", error });
   }
 };
 
-/* ===============ADMIN================== */
+/* =============== ADMIN CONTROLLERS =============== */
 
+// CREATE flight + generate seats
 module.exports.createFlight = async (req, res) => {
   try {
     const { seatCapacity, ...rest } = req.body;
 
-    // Create Flight
-    const flight = new Flight({
-      ...rest,
-      seatCapacity,
-      availableSeats: seatCapacity,
-    });
+    const flight = new Flight({ ...rest, seatCapacity });
     await flight.save();
 
-    // Generate Seats
-    const seats = [];
     const seatLetters = ["A", "B", "C", "D", "E", "F"];
-    for (let i = 0; i < seatCapacity; i++) {
+    const seats = Array.from({ length: seatCapacity }, (_, i) => {
       const row = Math.floor(i / 6) + 1;
       const col = seatLetters[i % 6];
-      seats.push({
+      return {
         flight: flight._id,
         seatNumber: `${row}${col}`,
         seatClass: "Economy",
-      });
-    }
+      };
+    });
 
     await Seat.insertMany(seats);
-
     res.status(201).json(flight);
-  } catch (err) {
-    console.error("Flight creation failed:", err);
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    console.error("Flight creation failed:", error);
+    res.status(500).json({ message: error.message });
   }
 };
 
+// UPDATE flight + seat capacity logic
 module.exports.updateFlight = async (req, res) => {
   try {
     const flightId = req.params.id;
     const flight = await Flight.findById(flightId);
     if (!flight) return res.status(404).json({ message: "Flight not found" });
 
-    const oldCapacity = flight.seatCapacity;
-    const newCapacity = req.body.seatCapacity;
-
-    const updatedFlight = await Flight.findByIdAndUpdate(flightId, req.body, {
+    const updated = await Flight.findByIdAndUpdate(flightId, req.body, {
       new: true,
       runValidators: true,
     });
 
-    // Step 1: Recalculate availableSeats
-    const allSeats = await Seat.find({ flight: flightId });
-    const bookedSeatsCount = allSeats.filter((s) => s.isBooked).length;
-
-    updatedFlight.availableSeats = updatedFlight.seatCapacity - bookedSeatsCount;
-    await updatedFlight.save(); // update the value in DB
-
-    res.status(200).json(updatedFlight);
+    res.status(200).json(updated);
   } catch (error) {
     console.error("Flight update failed:", error);
     res.status(400).json({ message: "Update failed", error });
   }
 };
 
+// DELETE flight
 module.exports.deleteFlight = async (req, res) => {
   try {
     const deleted = await Flight.findByIdAndDelete(req.params.id);
@@ -238,6 +206,7 @@ module.exports.deleteFlight = async (req, res) => {
   }
 };
 
+// FILTER by fields (admin panel)
 module.exports.filterFlights = async (req, res) => {
   try {
     const filters = req.body;
@@ -248,18 +217,20 @@ module.exports.filterFlights = async (req, res) => {
   }
 };
 
+// GET flights by date range
 module.exports.getFlightsByDateRange = async (req, res) => {
   try {
     const { start, end } = req.query;
     const flights = await Flight.find({
-      date: { $gte: new Date(start), $lte: new Date(end) },
-    });
+      departureTime: { $gte: new Date(start), $lte: new Date(end) },
+    }).sort({ departureTime: 1 });
     res.status(200).json(flights);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch range", error });
   }
 };
 
+// UPDATE flight status
 module.exports.updateFlightStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -270,6 +241,7 @@ module.exports.updateFlightStatus = async (req, res) => {
   }
 };
 
+// (Optional future use) Update available seats directly
 module.exports.updateSeatAvailability = async (req, res) => {
   try {
     const { seatsAvailable } = req.body;
