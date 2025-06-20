@@ -13,11 +13,20 @@ const app = express();
 // ===== MIDDLEWARES ===== //
 app.use(express.json());
 
-// CORS: Allow local or Render frontend
+// ===== CORS SETUP (for dev + production) ===== //
+const allowedOrigins = ["http://localhost:3000", "https://airline-ticketing-client.vercel.app"];
+
 const corsOptions = {
-  origin: process.env.CLIENT_ORIGIN || "http://localhost:3000",
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true,
 };
+
 app.use(cors(corsOptions));
 
 // ===== SESSIONS ===== //
@@ -63,29 +72,30 @@ app.use("/payments", paymentRoute);
 async function startServer() {
   try {
     await mongoose.connect(process.env.MONGODB_STRING);
-    console.log("Connected to MongoDB Atlas successfully!");
+    console.log("✅ Connected to MongoDB Atlas successfully!");
 
     autoFailBookings();
 
-    const PORT = process.env.PORT || 3000;
+    const PORT = process.env.PORT || 4000;
     app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
+      console.log(`🚀 Server is running on port ${PORT}`);
     });
   } catch (error) {
-    console.error("Failed to connect to MongoDB", error);
+    console.error("❌ Failed to connect to MongoDB", error);
     process.exit(1);
   }
 }
 
-// ===== HANDLE ERRORS GLOBALLY ===== //
+// ===== HANDLE UNHANDLED PROMISE REJECTIONS ===== //
 process.on("unhandledRejection", (err) => {
-  console.error("Unhandled Rejection:", err);
+  console.error("🚨 Unhandled Rejection:", err);
   process.exit(1);
 });
 
-// ===== LAUNCH ===== //
+// ===== LAUNCH SERVER ===== //
 if (require.main === module) {
   startServer();
 }
 
+// ===== EXPORT FOR TESTING OR MODULAR USE ===== //
 module.exports = { app, mongoose };
