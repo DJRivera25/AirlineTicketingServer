@@ -73,26 +73,31 @@ module.exports.searchFlights = async (req, res) => {
       return res.status(400).json({ message: "From, to, and departure date are required." });
     }
 
-    const normalizedFrom = from.trim();
-    const normalizedTo = to.trim();
-    const numPassengers = Number(passengers);
+    // Escape special characters in regex
+    const escapeRegex = (text) => text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
 
     const depStart = new Date(departure);
     const depEnd = new Date(depStart);
     depEnd.setDate(depEnd.getDate() + 1);
 
-    // 🔍 Search outbound flights
+    console.log("Outbound Search:", {
+      from,
+      to,
+      depStart: depStart.toISOString(),
+      depEnd: depEnd.toISOString(),
+    });
+
+    // 🔍 Relaxed & escaped regex match
     let outboundFlights = await Flight.find({
-      from: { $regex: `^${normalizedFrom}$`, $options: "i" },
-      to: { $regex: `^${normalizedTo}$`, $options: "i" },
+      from: { $regex: escapeRegex(from), $options: "i" },
+      to: { $regex: escapeRegex(to), $options: "i" },
       departureTime: { $gte: depStart, $lt: depEnd },
     }).sort({ departureTime: 1 });
 
-    // 🎫 Filter flights with enough available seats
     outboundFlights = await Promise.all(
       outboundFlights.map(async (flight) => {
-        const availableSeats = await Seat.countDocuments({ flight: flight._id, isBooked: false });
-        return availableSeats >= numPassengers ? { ...flight.toObject(), availableSeats } : null;
+        const count = await Seat.countDocuments({ flight: flight._id, isBooked: false });
+        return count >= passengers ? { ...flight.toObject(), availableSeats: count } : null;
       })
     );
     outboundFlights = outboundFlights.filter(Boolean);
@@ -104,16 +109,23 @@ module.exports.searchFlights = async (req, res) => {
       const retEnd = new Date(retStart);
       retEnd.setDate(retEnd.getDate() + 1);
 
+      console.log("Return Search:", {
+        from: to,
+        to: from,
+        retStart: retStart.toISOString(),
+        retEnd: retEnd.toISOString(),
+      });
+
       let returnCandidates = await Flight.find({
-        from: { $regex: `^${normalizedTo}$`, $options: "i" },
-        to: { $regex: `^${normalizedFrom}$`, $options: "i" },
+        from: { $regex: escapeRegex(to), $options: "i" },
+        to: { $regex: escapeRegex(from), $options: "i" },
         departureTime: { $gte: retStart, $lt: retEnd },
       }).sort({ departureTime: 1 });
 
       returnFlights = await Promise.all(
         returnCandidates.map(async (flight) => {
-          const availableSeats = await Seat.countDocuments({ flight: flight._id, isBooked: false });
-          return availableSeats >= numPassengers ? { ...flight.toObject(), availableSeats } : null;
+          const count = await Seat.countDocuments({ flight: flight._id, isBooked: false });
+          return count >= passengers ? { ...flight.toObject(), availableSeats: count } : null;
         })
       );
       returnFlights = returnFlights.filter(Boolean);
@@ -122,7 +134,7 @@ module.exports.searchFlights = async (req, res) => {
     const noOutbound = outboundFlights.length === 0;
     const noReturn = returnDate && returnFlights.length === 0;
 
-    res.status(200).json({
+    return res.status(200).json({
       roundTrip: !!returnDate,
       outbound: outboundFlights,
       return: returnFlights,
@@ -136,7 +148,7 @@ module.exports.searchFlights = async (req, res) => {
           : "Flights found.",
     });
   } catch (error) {
-    console.error("🔴 Flight search failed:", error);
+    console.error("Flight search failed:", error);
     res.status(500).json({ message: "Flight search failed", error: error.message });
   }
 };
