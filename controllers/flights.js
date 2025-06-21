@@ -73,18 +73,18 @@ module.exports.searchFlights = async (req, res) => {
       return res.status(400).json({ message: "From, to, and departure date are required." });
     }
 
-    const normalizedFrom = from.toUpperCase();
-    const normalizedTo = to.toUpperCase();
     const depStart = new Date(departure);
     const depEnd = new Date(depStart);
     depEnd.setDate(depEnd.getDate() + 1);
 
+    // 🔍 Case-insensitive match using regex
     let outboundFlights = await Flight.find({
-      from: normalizedFrom,
-      to: normalizedTo,
+      from: { $regex: `^${from}$`, $options: "i" },
+      to: { $regex: `^${to}$`, $options: "i" },
       departureTime: { $gte: depStart, $lt: depEnd },
     }).sort({ departureTime: 1 });
 
+    // ✅ Filter flights with enough available seats
     outboundFlights = await Promise.all(
       outboundFlights.map(async (flight) => {
         const count = await Seat.countDocuments({ flight: flight._id, isBooked: false });
@@ -94,14 +94,15 @@ module.exports.searchFlights = async (req, res) => {
     outboundFlights = outboundFlights.filter(Boolean);
 
     let returnFlights = [];
+
     if (returnDate) {
       const retStart = new Date(returnDate);
       const retEnd = new Date(retStart);
       retEnd.setDate(retEnd.getDate() + 1);
 
       let returnCandidates = await Flight.find({
-        from: normalizedTo,
-        to: normalizedFrom,
+        from: { $regex: `^${to}$`, $options: "i" },
+        to: { $regex: `^${from}$`, $options: "i" },
         departureTime: { $gte: retStart, $lt: retEnd },
       }).sort({ departureTime: 1 });
 
@@ -117,7 +118,7 @@ module.exports.searchFlights = async (req, res) => {
     const noOutbound = outboundFlights.length === 0;
     const noReturn = returnDate && returnFlights.length === 0;
 
-    res.status(200).json({
+    return res.status(200).json({
       roundTrip: !!returnDate,
       outbound: outboundFlights,
       return: returnFlights,
