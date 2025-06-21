@@ -18,4 +18,5 @@ router.patch("/:id/status", verify, verifyAdmin, flightController.updateFlightSt
 router.patch("/:id/seats", verify, verifyAdmin, flightController.updateSeatAvailability);
 router.post("/filter", verify, verifyAdmin, flightController.filterFlights); // or support POST with body filters
 
+router.post("/import", verify, verifyAdmin, flightController.importFlights);
 module.exports = router;

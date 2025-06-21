@@ -73,22 +73,26 @@ module.exports.searchFlights = async (req, res) => {
       return res.status(400).json({ message: "From, to, and departure date are required." });
     }
 
+    const normalizedFrom = from.trim();
+    const normalizedTo = to.trim();
+    const numPassengers = Number(passengers);
+
     const depStart = new Date(departure);
     const depEnd = new Date(depStart);
     depEnd.setDate(depEnd.getDate() + 1);
 
-    // 🔍 Case-insensitive match using regex
+    // 🔍 Search outbound flights
     let outboundFlights = await Flight.find({
-      from: { $regex: `^${from}$`, $options: "i" },
-      to: { $regex: `^${to}$`, $options: "i" },
+      from: { $regex: `^${normalizedFrom}$`, $options: "i" },
+      to: { $regex: `^${normalizedTo}$`, $options: "i" },
       departureTime: { $gte: depStart, $lt: depEnd },
     }).sort({ departureTime: 1 });
 
-    // ✅ Filter flights with enough available seats
+    // 🎫 Filter flights with enough available seats
     outboundFlights = await Promise.all(
       outboundFlights.map(async (flight) => {
-        const count = await Seat.countDocuments({ flight: flight._id, isBooked: false });
-        return count >= passengers ? { ...flight.toObject(), availableSeats: count } : null;
+        const availableSeats = await Seat.countDocuments({ flight: flight._id, isBooked: false });
+        return availableSeats >= numPassengers ? { ...flight.toObject(), availableSeats } : null;
       })
     );
     outboundFlights = outboundFlights.filter(Boolean);
@@ -101,15 +105,15 @@ module.exports.searchFlights = async (req, res) => {
       retEnd.setDate(retEnd.getDate() + 1);
 
       let returnCandidates = await Flight.find({
-        from: { $regex: `^${to}$`, $options: "i" },
-        to: { $regex: `^${from}$`, $options: "i" },
+        from: { $regex: `^${normalizedTo}$`, $options: "i" },
+        to: { $regex: `^${normalizedFrom}$`, $options: "i" },
         departureTime: { $gte: retStart, $lt: retEnd },
       }).sort({ departureTime: 1 });
 
       returnFlights = await Promise.all(
         returnCandidates.map(async (flight) => {
-          const count = await Seat.countDocuments({ flight: flight._id, isBooked: false });
-          return count >= passengers ? { ...flight.toObject(), availableSeats: count } : null;
+          const availableSeats = await Seat.countDocuments({ flight: flight._id, isBooked: false });
+          return availableSeats >= numPassengers ? { ...flight.toObject(), availableSeats } : null;
         })
       );
       returnFlights = returnFlights.filter(Boolean);
@@ -118,7 +122,7 @@ module.exports.searchFlights = async (req, res) => {
     const noOutbound = outboundFlights.length === 0;
     const noReturn = returnDate && returnFlights.length === 0;
 
-    return res.status(200).json({
+    res.status(200).json({
       roundTrip: !!returnDate,
       outbound: outboundFlights,
       return: returnFlights,
@@ -132,7 +136,7 @@ module.exports.searchFlights = async (req, res) => {
           : "Flights found.",
     });
   } catch (error) {
-    console.error("Flight search failed:", error);
+    console.error("🔴 Flight search failed:", error);
     res.status(500).json({ message: "Flight search failed", error: error.message });
   }
 };
@@ -254,5 +258,48 @@ module.exports.updateSeatAvailability = async (req, res) => {
     res.status(200).json(flight);
   } catch (error) {
     res.status(400).json({ message: "Seat update failed", error });
+  }
+};
+
+module.exports.importFlights = async (req, res) => {
+  try {
+    const flights = req.body;
+
+    if (!Array.isArray(flights)) {
+      return res.status(400).json({ message: "Payload must be an array of flights" });
+    }
+
+    const savedFlights = [];
+
+    for (const flightData of flights) {
+      const { seatCapacity, ...rest } = flightData;
+
+      const flight = new Flight({ ...rest, seatCapacity });
+      await flight.save(); // 🛫 triggers pre-save hook for duration
+
+      // 🪑 Generate seats for this flight
+      const seatLetters = ["A", "B", "C", "D", "E", "F"];
+      const seats = Array.from({ length: seatCapacity }, (_, i) => {
+        const row = Math.floor(i / 6) + 1;
+        const col = seatLetters[i % 6];
+        return {
+          flight: flight._id,
+          seatNumber: `${row}${col}`,
+          seatClass: "Economy",
+        };
+      });
+
+      await Seat.insertMany(seats); // ✅ Insert seat documents
+
+      savedFlights.push(flight);
+    }
+
+    res.status(201).json({
+      message: `${savedFlights.length} flights imported successfully with seats.`,
+      data: savedFlights,
+    });
+  } catch (err) {
+    console.error("Bulk flight import failed:", err);
+    res.status(500).json({ message: "Bulk import failed", error: err.message });
   }
 };
