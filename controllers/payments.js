@@ -2,6 +2,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const Payment = require("../models/Payment");
 const Booking = require("../models/Booking");
 const User = require("../models/User");
+const axios = require("axios");
 
 module.exports.createPaymentIntent = async (req, res) => {
   const { amount } = req.body; // amount in cents
@@ -85,5 +86,50 @@ module.exports.getPayment = async (req, res) => {
   } catch (error) {
     console.error("Error fetching user payments:", error);
     res.status(500).json({ error: "Failed to fetch your payments." });
+  }
+};
+
+module.exports.createGcashSandboxCharge = async (req, res) => {
+  const { amount, email, phone } = req.body;
+  const formatToE164 = (phone) => {
+    if (!phone) return "";
+    if (phone.startsWith("+")) return phone;
+    if (phone.startsWith("0")) return "+63" + phone.slice(1);
+    return phone;
+  };
+  try {
+    const response = await axios.post(
+      "https://api.xendit.co/ewallets/charges",
+      {
+        reference_id: `demo-gcash-${Date.now()}`,
+        currency: "PHP",
+        amount,
+        checkout_method: "ONE_TIME_PAYMENT",
+        channel_code: "PH_GCASH",
+        channel_properties: {
+          success_redirect_url: "https://airline-ticketing-client.vercel.app/gcash/payment-success", // change to your local or prod URL
+          failure_redirect_url: "https://airline-ticketing-client.vercel.app/payment-failed",
+        },
+        customer: {
+          email,
+          mobile_number: formatToE164(phone),
+        },
+      },
+      {
+        auth: {
+          username: process.env.XENDIT_SANDBOX_SECRET_KEY, // keep key in .env
+          password: "",
+        },
+      }
+    );
+
+    res.status(200).json(response.data);
+  } catch (error) {
+    console.error("GCash Sandbox Error:", {
+      status: error.response?.status,
+      message: error.response?.data?.message,
+      errors: error.response?.data?.errors,
+    });
+    res.status(500).json({ error: error.message });
   }
 };

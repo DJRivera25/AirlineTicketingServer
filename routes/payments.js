@@ -7,5 +7,6 @@ router.post("/create-payment-intent", verify, paymentController.createPaymentInt
 router.post("/record", verify, paymentController.createPayment);
 router.get("/all", verify, verifyAdmin, paymentController.getAllPayment);
 router.get("/", verify, paymentController.getPayment);
+router.post("/sandbox/gcash", verify, paymentController.createGcashSandboxCharge);
 
 module.exports = router;
