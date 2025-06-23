@@ -108,13 +108,16 @@ module.exports.getPayment = async (req, res) => {
 
 module.exports.createGcashSandboxCharge = async (req, res) => {
   const { amount, email, phone } = req.body;
+
   const formatToE164 = (phone) => {
     if (!phone) return "";
     if (phone.startsWith("+")) return phone;
     if (phone.startsWith("0")) return "+63" + phone.slice(1);
     return phone;
   };
+
   try {
+    // 1. Make the charge request with placeholder success/failure URLs (can be dummy)
     const response = await axios.post(
       "https://api.xendit.co/ewallets/charges",
       {
@@ -124,8 +127,8 @@ module.exports.createGcashSandboxCharge = async (req, res) => {
         checkout_method: "ONE_TIME_PAYMENT",
         channel_code: "PH_GCASH",
         channel_properties: {
-          success_redirect_url: `https://airline-ticketing-client.vercel.app/gcash/payment-success?tx_id=${response.data.id}`,
-          failure_redirect_url: "https://airline-ticketing-client.vercel.app/payment-failed",
+          success_redirect_url: "https://placeholder.com", // temp value
+          failure_redirect_url: "https://placeholder.com",
         },
         customer: {
           email,
@@ -134,13 +137,32 @@ module.exports.createGcashSandboxCharge = async (req, res) => {
       },
       {
         auth: {
-          username: process.env.XENDIT_SANDBOX_SECRET_KEY, // keep key in .env
+          username: process.env.XENDIT_SANDBOX_SECRET_KEY,
           password: "",
         },
       }
     );
 
-    res.status(200).json(response.data);
+    const charge = response.data;
+
+    // 2. Update the charge with the correct redirect URLs using the real charge ID
+    await axios.post(
+      `https://api.xendit.co/ewallets/charges/${charge.id}/updates`,
+      {
+        channel_properties: {
+          success_redirect_url: `https://airline-ticketing-client.vercel.app/gcash/payment-success?tx_id=${charge.id}`,
+          failure_redirect_url: "https://airline-ticketing-client.vercel.app/payment-failed",
+        },
+      },
+      {
+        auth: {
+          username: process.env.XENDIT_SANDBOX_SECRET_KEY,
+          password: "",
+        },
+      }
+    );
+
+    res.status(200).json(charge);
   } catch (error) {
     console.error("GCash Sandbox Error:", {
       status: error.response?.status,
