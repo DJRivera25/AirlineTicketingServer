@@ -172,6 +172,6 @@ module.exports.verifyGcashPayment = async (req, res) => {
     });
   } catch (err) {
     console.error("Verification error:", err);
-    res.status(500).json({ valid: false });
+    res.status(500).json({ valid: false, error: error.message });
   }
 };
