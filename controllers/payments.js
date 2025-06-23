@@ -5,7 +5,7 @@ const User = require("../models/User");
 const axios = require("axios");
 
 module.exports.createPaymentIntent = async (req, res) => {
-  const { amount } = req.body; // amount in cents
+  const { amount } = req.body;
 
   try {
     const paymentIntent = await stripe.paymentIntents.create({
@@ -14,9 +14,7 @@ module.exports.createPaymentIntent = async (req, res) => {
       automatic_payment_methods: { enabled: true },
     });
 
-    res.send({
-      clientSecret: paymentIntent.client_secret,
-    });
+    res.send({ clientSecret: paymentIntent.client_secret });
   } catch (error) {
     console.error("Stripe error:", error);
     res.status(500).send({ error: error.message });
@@ -36,7 +34,6 @@ module.exports.createPayment = async (req, res) => {
       transactionId,
       receiptUrl,
       paidAt,
-
       // Xendit-specific
       xenditChargeId,
       xenditReferenceId,
@@ -46,7 +43,7 @@ module.exports.createPayment = async (req, res) => {
       xenditRedirectFailureUrl,
     } = req.body;
 
-    const user = req.user.id;
+    const user = req.user.id; // ✅ Assumes this route is protected with auth middleware
 
     const payment = new Payment({
       booking,
@@ -60,8 +57,6 @@ module.exports.createPayment = async (req, res) => {
       transactionId,
       receiptUrl,
       paidAt: paidAt ? new Date(paidAt) : undefined,
-
-      // Optional: Xendit fields
       xenditChargeId,
       xenditReferenceId,
       xenditCheckoutUrl,
@@ -117,18 +112,20 @@ module.exports.createGcashSandboxCharge = async (req, res) => {
   };
 
   try {
-    // 1. Make the charge request with placeholder success/failure URLs (can be dummy)
+    const referenceId = `demo-gcash-${Date.now()}`;
+
     const response = await axios.post(
       "https://api.xendit.co/ewallets/charges",
       {
-        reference_id: `demo-gcash-${Date.now()}`,
+        reference_id: referenceId,
         currency: "PHP",
         amount,
         checkout_method: "ONE_TIME_PAYMENT",
         channel_code: "PH_GCASH",
         channel_properties: {
-          success_redirect_url: "https://placeholder.com", // temp value
-          failure_redirect_url: "https://placeholder.com",
+          // ✅ Manually pass reference_id in URL for frontend tracking
+          success_redirect_url: `https://airline-ticketing-client.vercel.app/gcash/payment-success?ref_id=${referenceId}`,
+          failure_redirect_url: "https://airline-ticketing-client.vercel.app/payment-failed",
         },
         customer: {
           email,
@@ -143,26 +140,7 @@ module.exports.createGcashSandboxCharge = async (req, res) => {
       }
     );
 
-    const charge = response.data;
-
-    // 2. Update the charge with the correct redirect URLs using the real charge ID
-    await axios.post(
-      `https://api.xendit.co/ewallets/charges/${charge.id}/updates`,
-      {
-        channel_properties: {
-          success_redirect_url: `https://airline-ticketing-client.vercel.app/gcash/payment-success?tx_id=${charge.id}`,
-          failure_redirect_url: "https://airline-ticketing-client.vercel.app/payment-failed",
-        },
-      },
-      {
-        auth: {
-          username: process.env.XENDIT_SANDBOX_SECRET_KEY,
-          password: "",
-        },
-      }
-    );
-
-    res.status(200).json(charge);
+    res.status(200).json(response.data);
   } catch (error) {
     console.error("GCash Sandbox Error:", {
       status: error.response?.status,
@@ -174,13 +152,13 @@ module.exports.createGcashSandboxCharge = async (req, res) => {
 };
 
 module.exports.verifyGcashPayment = async (req, res) => {
-  const { tx_id } = req.query;
+  const { ref_id } = req.query;
 
-  if (!tx_id) return res.status(400).json({ valid: false });
+  if (!ref_id) return res.status(400).json({ valid: false });
 
   try {
     const payment = await Payment.findOne({
-      transactionId: tx_id,
+      xenditReferenceId: ref_id,
       method: "gcash",
       status: "succeeded",
     });
@@ -190,7 +168,7 @@ module.exports.verifyGcashPayment = async (req, res) => {
     res.json({
       valid: true,
       bookingId: payment.booking,
-      payment: chargeData, // full charge object from Xendit
+      payment,
     });
   } catch (err) {
     console.error("Verification error:", err);
