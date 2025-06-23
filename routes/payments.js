@@ -8,5 +8,6 @@ router.post("/record", verify, paymentController.createPayment);
 router.get("/all", verify, verifyAdmin, paymentController.getAllPayment);
 router.get("/", verify, paymentController.getPayment);
 router.post("/sandbox/gcash", verify, paymentController.createGcashSandboxCharge);
+router.post("/verify-gcash", verify, paymentController.verifyGcashPayment);
 
 module.exports = router;

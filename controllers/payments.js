@@ -30,27 +30,44 @@ module.exports.createPayment = async (req, res) => {
       method,
       amount,
       status,
+      currency,
       stripePaymentIntentId,
       stripeCustomerId,
       transactionId,
       receiptUrl,
       paidAt,
+
+      // Xendit-specific
+      xenditChargeId,
+      xenditReferenceId,
+      xenditCheckoutUrl,
+      xenditChannelCode,
+      xenditRedirectSuccessUrl,
+      xenditRedirectFailureUrl,
     } = req.body;
 
     const user = req.user.id;
 
-    // Create payment document
     const payment = new Payment({
       booking,
       user,
       method,
       amount,
       status,
+      currency: currency || "PHP",
       stripePaymentIntentId,
       stripeCustomerId,
       transactionId,
       receiptUrl,
       paidAt: paidAt ? new Date(paidAt) : undefined,
+
+      // Optional: Xendit fields
+      xenditChargeId,
+      xenditReferenceId,
+      xenditCheckoutUrl,
+      xenditChannelCode,
+      xenditRedirectSuccessUrl,
+      xenditRedirectFailureUrl,
     });
 
     await payment.save();
@@ -107,7 +124,7 @@ module.exports.createGcashSandboxCharge = async (req, res) => {
         checkout_method: "ONE_TIME_PAYMENT",
         channel_code: "PH_GCASH",
         channel_properties: {
-          success_redirect_url: "https://airline-ticketing-client.vercel.app/gcash/payment-success", // change to your local or prod URL
+          success_redirect_url: `https://airline-ticketing-client.vercel.app/gcash/payment-success?tx_id=${response.data.id}`,
           failure_redirect_url: "https://airline-ticketing-client.vercel.app/payment-failed",
         },
         customer: {
@@ -131,5 +148,30 @@ module.exports.createGcashSandboxCharge = async (req, res) => {
       errors: error.response?.data?.errors,
     });
     res.status(500).json({ error: error.message });
+  }
+};
+
+module.exports.verifyGcashPayment = async (req, res) => {
+  const { tx_id } = req.query;
+
+  if (!tx_id) return res.status(400).json({ valid: false });
+
+  try {
+    const payment = await Payment.findOne({
+      transactionId: tx_id,
+      method: "gcash",
+      status: "succeeded",
+    });
+
+    if (!payment) return res.status(404).json({ valid: false });
+
+    res.json({
+      valid: true,
+      bookingId: payment.booking,
+      payment: chargeData, // full charge object from Xendit
+    });
+  } catch (err) {
+    console.error("Verification error:", err);
+    res.status(500).json({ valid: false });
   }
 };

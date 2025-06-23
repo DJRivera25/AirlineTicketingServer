@@ -27,17 +27,29 @@ const paymentSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    default: "php",
+    default: "PHP",
+    uppercase: true,
   },
-  stripePaymentIntentId: String, // Stripe's PaymentIntent ID
-  stripeCustomerId: String, // Optional: if you create Stripe customers
-  transactionId: String, // Optional legacy/other method
-  receiptUrl: String, // Stripe hosted receipt link
+
+  // ✅ Stripe fields
+  stripePaymentIntentId: String,
+  stripeCustomerId: String,
+  receiptUrl: String,
+
+  // ✅ Xendit (GCash, etc.)
+  xenditChargeId: String, // e.g., ewc_xxxxx
+  xenditCheckoutUrl: String, // desktop or mobile web checkout
+  xenditReferenceId: String, // your custom reference id
+  xenditChannelCode: String, // PH_GCASH, PH_PAYMAYA, etc.
+  xenditRedirectSuccessUrl: String,
+  xenditRedirectFailureUrl: String,
+
+  // ✅ General
+  transactionId: String, // used as a general unique identifier
   paidAt: Date,
+
   createdAt: {
     type: Date,
     default: Date.now,
   },
 });
-
-module.exports = mongoose.model("Payment", paymentSchema);
