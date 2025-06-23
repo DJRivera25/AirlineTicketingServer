@@ -53,3 +53,5 @@ const paymentSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+module.exports = mongoose.model("Payment", paymentSchema);
